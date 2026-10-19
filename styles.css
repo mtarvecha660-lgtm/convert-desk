@@ -31,3 +31,5 @@ main{padding:0 14px 40px;max-width:560px;margin:0 auto}
 .spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite;flex:none}
 @keyframes sp{to{transform:rotate(360deg)}}
 #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#262d31;color:#fff;padding:10px 16px;border-radius:10px;font-size:13.5px;max-width:88vw;z-index:9}
+
+.tolabel{font-size:10.5px;letter-spacing:1.2px;color:var(--mut);margin:12px 0 0;font-weight:700}

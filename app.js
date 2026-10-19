@@ -31,28 +31,30 @@ function render(){
   queue.innerHTML=items.map((it,i)=>`
   <div class="card" data-i="${i}">
     <div class="frow">
-      <div class="fname"><b>${esc(it.file.name)}</b><small>${human(it.file.size)} · ${kind(it.file)?esc(kind(it.file).toUpperCase()):'unsupported'}</small></div>
+      <div class="fname"><b>${esc(it.file.name)}</b><small>${human(it.file.size)} · ${it.kind?esc(it.kind.toUpperCase()):'not supported'}</small></div>
       <button class="x" data-rm="${i}">×</button>
     </div>
-    <div class="opts">${targets(kind(it.file)).map(t=>`<button class="chip${it.target===t?' on':''}" data-set="${t}">${t.toUpperCase()}</button>`).join('')}</div>
-    ${it.target!=='pdf'&&kind(it.file)==='image'?`<div class="slider"><span>quality</span><input type="range" min="30" max="100" value="${it.q}" data-q><b>${it.q}%</b></div>
-    <div class="slider"><span>resize</span><input type="range" min="20" max="100" value="${it.w}" data-w><b>${it.w}%</b></div>`:''}
+    ${it.kind?`<div class="tolabel">CONVERT TO</div><div class="opts">${targets(it.kind).map(t=>`<button class="chip${it.target===t?' on':''}" data-set="${t}">${t.toUpperCase()}</button>`).join('')}</div>
+    ${it.target!=='pdf'&&it.kind==='image'?`<div class="slider"><span>quality</span><input type="range" min="30" max="100" value="${it.q}" data-q><b>${it.q}%</b></div>
+    <div class="slider"><span>resize</span><input type="range" min="20" max="100" value="${it.w}" data-w><b>${it.w}%</b></div>`:''}`:`<div class="bad">I can't convert this file type offline. Supported: jpg, png, webp, bmp, gif, pdf, csv, xlsx, docx, txt, md, json.</div>`}
   </div>`).join('');
   if(items.filter(i=>kind(i.file)==='image'&&!i.merged).length>1){
     queue.insertAdjacentHTML('beforeend',`<div class="card"><label class="merge"><input type="checkbox" id="merge-pdf"${merge?' checked':''}> Merge all images into one PDF (in list order)</label></div>`);
   }
-  const can=items.length&&items.every(i=>kind(i.file)&&i.target)&&!busy;
+  const can=items.length&&items.some(i=>i.kind&&i.target)&&!busy;
   queue.insertAdjacentHTML('beforeend',`<button class="btn" id="go" ${can?'':'disabled'}>${busy?'Converting…':'Convert'}</button>`);
 }
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 let merge=true;
 
 function addFiles(fl){
+  let lastBad='';
   for(const f of fl){
     const k=kind(f);
-    if(!k){toast(`Can't convert .${ext(f.name)||'?'} files (yet)`);continue;}
+    if(!k){lastBad=ext(f.name)||'?';items.push({file:f,kind:null,target:null});continue;}
     items.push({file:f,kind:k,target:targets(k)[0],q:90,w:100});
   }
+  if(lastBad)toast(`.${lastBad} not supported offline yet — check the list on its card`);
   render();
 }
 queue.addEventListener('click',e=>{
@@ -179,6 +181,7 @@ async function convert(){
   try{
     if(useMerge){out.push(await imgsToPdf(imgList));}
     for(const it of items){
+      if(!it.kind||!it.target)continue;
       if(useMerge&&kind(it.file)==='image'&&it.target==='pdf')continue;
       const r=await convertOne(it);
       (Array.isArray(r)?r:[r]).forEach(x=>out.push(x));
