@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Convert Desk</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#0f1214">
+<script src="libs/pdf-lib.min.js"></script>
+<script src="libs/xlsx.full.min.js"></script>
+<script src="libs/mammoth.browser.min.js"></script>
+<script src="libs/pdfjs/pdf.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffb703" stroke-width="2.2" stroke-linecap="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg><h1>Convert Desk</h1></div>
+  <span class="tag">offline · files never leave your phone</span>
+</header>
+<main>
+  <section id="pick">
+    <label class="drop" id="drop">
+      <input type="file" id="file-input" multiple hidden>
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <strong>Pick files</strong>
+      <span>images, pdf, csv, xlsx, docx, txt &amp; more</span>
+    </label>
+  </section>
+  <section id="queue"></section>
+  <section id="results"></section>
+</main>
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
