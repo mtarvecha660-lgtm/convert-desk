@@ -16,8 +16,9 @@ main{padding:0 14px 40px;max-width:560px;margin:0 auto}
 .fname small{color:var(--mut);font-size:12px}
 .x{background:none;border:none;color:var(--mut);font-size:20px;padding:4px 6px;cursor:pointer}
 .opts{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
-.chip{border:1.5px solid var(--line);background:none;color:var(--txt);border-radius:999px;padding:7px 14px;font-size:13px;cursor:pointer}
-.chip.on{border-color:var(--acc);color:var(--acc);background:rgba(255,183,3,.08)}
+.chip{display:flex;align-items:center;gap:7px;border:1.5px solid var(--line);background:none;color:var(--txt);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer}
+.chip input{width:17px;height:17px;accent-color:var(--acc);margin:0}
+.chip.on{border-color:var(--acc);color:var(--acc);font-weight:700;background:rgba(255,183,3,.14)}
 .slider{display:flex;align-items:center;gap:10px;margin-top:11px;font-size:13px;color:var(--mut)}
 .slider input{flex:1;accent-color:var(--acc)}
 .merge{display:flex;align-items:center;gap:9px;margin-top:12px;font-size:13.5px}

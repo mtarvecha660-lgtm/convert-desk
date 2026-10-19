@@ -34,7 +34,7 @@ function render(){
       <div class="fname"><b>${esc(it.file.name)}</b><small>${human(it.file.size)} · ${it.kind?esc(it.kind.toUpperCase()):'not supported'}</small></div>
       <button class="x" data-rm="${i}">×</button>
     </div>
-    ${it.kind?`<div class="tolabel">CONVERT TO</div><div class="opts">${targets(it.kind).map(t=>`<button class="chip${it.target===t?' on':''}" data-set="${t}">${t.toUpperCase()}</button>`).join('')}</div>
+    ${it.kind?`<div class="tolabel">CONVERT TO</div><div class="opts">${targets(it.kind).map(t=>`<label class="chip${it.target===t?' on':''}"><input type="radio" name="fmt${i}" value="${t}"${it.target===t?' checked':''} data-set="${t}"><span>${t.toUpperCase()}</span></label>`).join('')}</div>
     ${it.target!=='pdf'&&it.kind==='image'?`<div class="slider"><span>quality</span><input type="range" min="30" max="100" value="${it.q}" data-q><b>${it.q}%</b></div>
     <div class="slider"><span>resize</span><input type="range" min="20" max="100" value="${it.w}" data-w><b>${it.w}%</b></div>`:''}`:`<div class="bad">I can't convert this file type offline. Supported: jpg, png, webp, bmp, gif, pdf, csv, xlsx, docx, txt, md, json.</div>`}
   </div>`).join('');
@@ -60,10 +60,18 @@ function addFiles(fl){
 queue.addEventListener('click',e=>{
   const rm=e.target.closest('[data-rm]');
   if(rm){items.splice(Number(rm.dataset.rm),1);render();return;}
-  const set=e.target.closest('[data-set]');
-  if(set){items[Number(set.closest('.card').dataset.i)].target=set.dataset.set;render();return;}
-  if(e.target.id==='merge-pdf')merge=e.target.checked;
   if(e.target.id==='go')convert();
+});
+queue.addEventListener('change',e=>{
+  if(e.target.id==='merge-pdf'){merge=e.target.checked;return;}
+  const set=e.target.closest('[data-set]');
+  if(!set)return;
+  const card=set.closest('.card'),it=items[Number(card.dataset.i)];
+  it.target=set.value;
+  card.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(set)));
+  const hasSliders=it.kind==='image'&&it.target!=='pdf';
+  let sl=card.querySelector('.slider');
+  if(!hasSliders&&sl){sl.parentElement.querySelectorAll('.slider').forEach(x=>x.remove());}
 });
 queue.addEventListener('input',e=>{
   const card=e.target.closest('.card');if(!card)return;
