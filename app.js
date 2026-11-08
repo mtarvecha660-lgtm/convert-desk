@@ -1,217 +1,403 @@
-const $=s=>document.querySelector(s);
-const input=$('#file-input'),queue=$('#queue'),results=$('#results');
-let items=[],busy=false;
-if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='libs/pdfjs/pdf.worker.min.js';
+/* Convert Desk: the page itself. Tools live in js/*.js and register with CD.register. */
+(function () {
+  const CD = window.CD;
+  const $ = (s, el) => (el || document).querySelector(s);
+  const app = $('#app');
+  const picker = $('#picker');
+  const GROUPS = [['convert', 'Convert'], ['image', 'Images'], ['pdf', 'PDF'], ['util', 'Utilities']];
+  const ACCEPT_TEXT = {
+    image: 'JPG, PNG, WebP, BMP, GIF', pdf: 'PDF', csv: 'CSV', xlsx: 'XLSX, XLS',
+    docx: 'DOCX', json: 'JSON', text: 'TXT, MD, LOG, SRT, XML, HTML',
+  };
+  const BRAND = '<a class="brand" href="#/"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f5a300" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg><span>Convert Desk</span></a>';
+  const S = (CD.app = { queue: [], results: [], tool: null, running: false, uid: 0 });
 
-const IMGS=['jpg','jpeg','png','webp','bmp','gif','heic'];
-function ext(n){const m=String(n).toLowerCase().match(/\.([a-z0-9]+)$/);return m?m[1]:'';}
-function kind(f){
-  const e=ext(f.name);
-  if(f.type.startsWith('image/')||IMGS.includes(e))return 'image';
-  if(e==='pdf'||f.type==='application/pdf')return 'pdf';
-  if(e==='csv')return 'csv';
-  if(['xlsx','xls'].includes(e))return 'xlsx';
-  if(e==='docx')return 'docx';
-  if(['txt','md','json','log','srt','xml','html'].includes(e))return 'text';
-  return null;
-}
-function targets(k){
-  if(k==='image')return ['png','jpg','webp','pdf'];
-  if(k==='pdf')return ['png','jpg','txt'];
-  if(k==='csv')return ['xlsx','pdf'];
-  if(k==='xlsx')return ['csv'];
-  if(k==='docx')return ['txt'];
-  if(k==='text')return ['pdf'];
-  return [];
-}
-function baseName(n){return n.replace(/\.[^.]+$/,'');}
-function human(b){return b>1048576?(b/1048576).toFixed(1)+' MB':Math.max(1,Math.round(b/1024))+' KB';}
+  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdfjs/pdf.worker.min.js';
 
-function render(){
-  queue.innerHTML=items.map((it,i)=>`
-  <div class="card" data-i="${i}">
-    <div class="frow">
-      <div class="fname"><b>${esc(it.file.name)}</b><small>${human(it.file.size)} · ${it.kind?esc(it.kind.toUpperCase()):'not supported'}</small></div>
-      <button class="x" data-rm="${i}">×</button>
-    </div>
-    ${it.kind?`<div class="tolabel">CONVERT TO</div><div class="opts">${targets(it.kind).map(t=>`<label class="chip${it.target===t?' on':''}"><input type="radio" name="fmt${i}" value="${t}"${it.target===t?' checked':''} data-set="${t}"><span>${t.toUpperCase()}</span></label>`).join('')}</div>
-    ${it.target!=='pdf'&&it.kind==='image'?`<div class="slider"><span>quality</span><input type="range" min="30" max="100" value="${it.q}" data-q><b>${it.q}%</b></div>
-    <div class="slider"><span>resize</span><input type="range" min="20" max="100" value="${it.w}" data-w><b>${it.w}%</b></div>`:''}`:`<div class="bad">I can't convert this file type offline. Supported: jpg, png, webp, bmp, gif, pdf, csv, xlsx, docx, txt, md, json.</div>`}
-  </div>`).join('');
-  if(items.filter(i=>kind(i.file)==='image'&&!i.merged).length>1){
-    queue.insertAdjacentHTML('beforeend',`<div class="card"><label class="merge"><input type="checkbox" id="merge-pdf"${merge?' checked':''}> Merge all images into one PDF (in list order)</label></div>`);
+  /* ---------- theme ---------- */
+  const themeBtn = $('#theme');
+  function effectiveDark() {
+    const t = document.documentElement.dataset.theme;
+    if (t) return t === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
-  const can=items.length&&items.some(i=>i.kind&&i.target)&&!busy;
-  queue.insertAdjacentHTML('beforeend',`<button class="btn" id="go" ${can?'':'disabled'}>${busy?'Converting…':'Convert'}</button>`);
-}
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-let merge=true;
+  themeBtn.addEventListener('click', () => {
+    const next = effectiveDark() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('cd-theme', next); } catch (e) {}
+  });
+  try {
+    const saved = localStorage.getItem('cd-theme');
+    if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
+  } catch (e) {}
 
-function addFiles(fl){
-  let lastBad='';
-  for(const f of fl){
-    const k=kind(f);
-    if(!k){lastBad=ext(f.name)||'?';items.push({file:f,kind:null,target:null});continue;}
-    items.push({file:f,kind:k,target:targets(k)[0],q:90,w:100});
+  /* ---------- toasts ---------- */
+  function toast(msg, bad) {
+    const el = document.createElement('div');
+    el.className = 'toast' + (bad ? ' bad' : '');
+    el.setAttribute('role', bad ? 'alert' : 'status');
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(() => el.classList.add('out'), bad ? 6000 : 3500);
+    setTimeout(() => el.remove(), bad ? 6500 : 4000);
   }
-  if(lastBad)toast(`.${lastBad} not supported offline yet — check the list on its card`);
-  render();
-}
-queue.addEventListener('click',e=>{
-  const rm=e.target.closest('[data-rm]');
-  if(rm){items.splice(Number(rm.dataset.rm),1);render();return;}
-  if(e.target.id==='go')convert();
-});
-queue.addEventListener('change',e=>{
-  if(e.target.id==='merge-pdf'){merge=e.target.checked;return;}
-  const set=e.target.closest('[data-set]');
-  if(!set)return;
-  const card=set.closest('.card'),it=items[Number(card.dataset.i)];
-  it.target=set.value;
-  card.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(set)));
-  const hasSliders=it.kind==='image'&&it.target!=='pdf';
-  let sl=card.querySelector('.slider');
-  if(!hasSliders&&sl){sl.parentElement.querySelectorAll('.slider').forEach(x=>x.remove());}
-});
-queue.addEventListener('input',e=>{
-  const card=e.target.closest('.card');if(!card)return;
-  const it=items[Number(card.dataset.i)];
-  if(e.target.dataset.q)it.q=Number(e.target.value);
-  if(e.target.dataset.w)it.w=Number(e.target.value);
-  const row=e.target.closest('.slider');if(row)row.querySelector('b').textContent=e.target.value+'%';
-});
-input.addEventListener('change',()=>{addFiles(input.files);input.value='';});
-const drop=$('#drop');
-['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
-['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
-drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+  CD.toast = toast;
 
-let tT;function toast(m,bad){const t=$('#toast');t.textContent=m;t.hidden=false;t.style.color=bad?'var(--err)':'#fff';clearTimeout(tT);tT=setTimeout(()=>t.hidden=true,3200);}
-
-// ---------- conversions ----------
-function loadImg(file){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('not a readable image'));i.src=URL.createObjectURL(file);});}
-async function toCanvas(file,maxPct){
-  const img=await loadImg(file);
-  const sc=(maxPct||100)/100;
-  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*sc));c.height=Math.max(1,Math.round(img.naturalHeight*sc));
-  const x=c.getContext('2d');x.drawImage(img,0,0,c.width,c.height);
-  return c;
-}
-function canvasBlob(c,type,q){return new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('encode failed')),type,q/100));}
-async function imgTo(item,fmt,q){
-  const c=await toCanvas(item.file,item.w);
-  const mime=fmt==='png'?'image/png':fmt==='jpg'?'image/jpeg':'image/webp';
-  return {blob:await canvasBlob(c,mime,q||item.q),name:baseName(item.file.name)+'.'+fmt};
-}
-async function imgsToPdf(list,q){
-  const doc=await PDFLib.PDFDocument.create();
-  for(const it of list){
-    let bytes;
-    if(ext(it.file.name)==='jpg'||ext(it.file.name)==='jpeg')bytes=await it.file.arrayBuffer();
-    else{const c=await toCanvas(it.file,100);const b=await canvasBlob(c,'image/jpeg',Math.max(q||it.q,85));bytes=await b.arrayBuffer();}
-    const img=await doc.embedJpg(bytes);
-    const page=doc.addPage([img.width,img.height]);
-    page.drawImage(img,{x:0,y:0,width:img.width,height:img.height});
-  }
-  const out=await doc.save();
-  return {blob:new Blob([out],{type:'application/pdf'}),name:baseName(list[0].file.name)+(list.length>1?`_+${list.length-1}`:'')+'.pdf'};
-}
-async function pdfToImgs(file,fmt){
-  const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const outs=[];
-  for(let p=1;p<=pdf.numPages;p++){
-    const page=await pdf.getPage(p);
-    const vp=page.getViewport({scale:2});
-    const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
-    await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-    const mime=fmt==='png'?'image/png':'image/jpeg';
-    outs.push({blob:await canvasBlob(c,mime,90),name:`${baseName(file.name)}_p${p}.${fmt}`});
-  }
-  return outs;
-}
-async function pdfToText(file){
-  const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  let txt='';
-  for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const tc=await page.getTextContent();txt+=tc.items.map(i=>i.str).join(' ')+'\n\n';}
-  return {blob:new Blob([txt],{type:'text/plain'}),name:baseName(file.name)+'.txt'};
-}
-async function csvToXlsx(file){
-  const wb=XLSX.read(await file.text(),{type:'string'});
-  const out=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-  return {blob:new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),name:baseName(file.name)+'.xlsx'};
-}
-async function xlsxToCsv(file){
-  const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
-  const csv=XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
-  return {blob:new Blob([csv],{type:'text/csv'}),name:baseName(file.name)+'.csv'};
-}
-async function docxToText(file){
-  const r=await mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()});
-  return {blob:new Blob([r.value],{type:'text/plain'}),name:baseName(file.name)+'.txt'};
-}
-async function textToPdf(file){
-  const txt=await file.text();
-  const doc=await PDFLib.PDFDocument.create();
-  const font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);
-  const W=595,H=842,M=50,LH=15,maxCh=Math.floor((W-2*M)/6.1);
-  const words=txt.replace(/\r/g,'').split('\n');
-  let y=H-M,page=doc.addPage([W,H]);
-  const line=raw=>{if(y<M){page=doc.addPage([W,H]);y=H-M;}page.drawText(raw,{x:M,y,size:10.5,font,lineHeight:LH});y-=LH;};
-  for(let ln of words){
-    if(!ln.trim()){y-=LH;continue;}
-    while(ln.length>maxCh){line(ln.slice(0,maxCh));ln=ln.slice(maxCh);}
-    line(ln);
-  }
-  const out=await doc.save();
-  return {blob:new Blob([out],{type:'application/pdf'}),name:baseName(file.name)+'.pdf'};
-}
-
-async function convertOne(it){
-  const k=kind(it.file),t=it.target;
-  if(k==='image'){
-    if(t==='pdf')return imgsToPdf([it]);
-    return imgTo(it,t);
-  }
-  if(k==='pdf'){if(t==='txt')return pdfToText(it.file);return (await pdfToImgs(it.file,t));}
-  if(k==='csv')return t==='xlsx'?csvToXlsx(it.file):textToPdf(it.file);
-  if(k==='xlsx')return xlsxToCsv(it.file);
-  if(k==='docx')return docxToText(it.file);
-  if(k==='text')return textToPdf(it.file);
-  throw new Error('unsupported');
-}
-async function convert(){
-  busy=true;render();results.innerHTML='';
-  const imgList=items.filter(i=>kind(i.file)==='image'&&i.target==='pdf');
-  const useMerge=merge&&imgList.length>1;
-  const out=[];
-  try{
-    if(useMerge){out.push(await imgsToPdf(imgList));}
-    for(const it of items){
-      if(!it.kind||!it.target)continue;
-      if(useMerge&&kind(it.file)==='image'&&it.target==='pdf')continue;
-      const r=await convertOne(it);
-      (Array.isArray(r)?r:[r]).forEach(x=>out.push(x));
+  /* ---------- queue ---------- */
+  function addFiles(list) {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    for (const f of files) {
+      const kind = CD.kindOf(f);
+      S.queue.push({
+        id: ++S.uid, file: f, kind, status: 'ready', pct: 0, err: '',
+        thumb: kind === 'image' ? URL.createObjectURL(f) : null,
+      });
     }
-    results.innerHTML=out.map((o,i)=>`<div class="card res"><div class="nm">${esc(o.name)}</div><button class="dl" data-dl="${i}">Download</button></div>`).join('');
-    results.dataset.blobs=JSON.stringify(out.map(o=>({name:o.name,size:o.blob.size})));
-    window._out=out;
-    toast(`Done. ${out.length} file${out.length>1?'s':''} ready.`);
-  }catch(err){
-    console.error(err);
-    toast('Conversion failed: '+err.message,true);
+    const n = files.length;
+    if (S.tool) render();
+    else {
+      render();
+      toast(`${n} file${n > 1 ? 's' : ''} added. Pick a tool.`);
+    }
   }
-  busy=false;render();
-}
-results.addEventListener('click',e=>{
-  const b=e.target.closest('[data-dl]');if(!b)return;
-  const o=window._out[Number(b.dataset.dl)];
-  const u=URL.createObjectURL(o.blob);
-  const a=document.createElement('a');a.href=u;a.download=o.name;a.click();
-  setTimeout(()=>URL.revokeObjectURL(u),4000);
-  if(navigator.canShare&&navigator.canShare({files:[new File([o.blob],o.name)]})){
-    navigator.share({files:[new File([o.blob],o.name)]}).catch(()=>{});
+  function removeItem(id) {
+    const i = S.queue.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    if (S.queue[i].thumb) URL.revokeObjectURL(S.queue[i].thumb);
+    S.queue.splice(i, 1);
+    render();
   }
-});
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+  function clearQueue() {
+    S.queue.forEach((x) => x.thumb && URL.revokeObjectURL(x.thumb));
+    S.queue = [];
+    render();
+  }
+  function clearResults() {
+    S.results.forEach((r) => r._url && URL.revokeObjectURL(r._url));
+    S.results = [];
+    render();
+  }
+  function toolFor(id) { return CD.tools.find((t) => t.id === id); }
+
+  /* ---------- routing ---------- */
+  function route() {
+    const m = location.hash.match(/^#\/t\/([\w-]+)/);
+    const tool = m ? toolFor(m[1]) : null;
+    if (S.tool !== tool) {
+      S.results.forEach((r) => r._url && URL.revokeObjectURL(r._url));
+      S.results = [];
+    }
+    S.tool = tool || null;
+    window.scrollTo(0, 0);
+    render();
+  }
+  window.addEventListener('hashchange', route);
+
+  /* ---------- rendering ---------- */
+  const esc = CD.esc;
+  function statusText(it) {
+    if (it.status === 'working') return `${it.pct}%`;
+    if (it.status === 'done') return 'done';
+    if (it.status === 'error') return it.err;
+    if (!it.kind) return 'type not supported by any tool here';
+    return `${CD.human(it.file.size)} · ${KIND_LABEL(it.kind)}`;
+  }
+  function KIND_LABEL(k) {
+    return { image: 'image', pdf: 'PDF', csv: 'CSV', xlsx: 'spreadsheet', docx: 'Word', json: 'JSON', text: 'text' }[k] || 'file';
+  }
+  function rowHtml(it, tool) {
+    const dim = tool && tool.accepts !== 'any' && !CD.accepts(tool, it) ? ' dim' : '';
+    const thumb = it.thumb ? `<img src="${it.thumb}" alt="">` : `<span>${(it.kind || '?').slice(0, 4).toUpperCase()}</span>`;
+    return `<li class="row ${it.status}${dim}" data-qid="${it.id}">
+      <div class="thumb">${thumb}</div>
+      <div class="meta">
+        <b class="nm">${esc(it.file.name)}</b>
+        <small class="st">${esc(statusText(it))}</small>
+        <div class="bar"><i style="width:${it.pct}%"></i></div>
+      </div>
+      <button class="x" type="button" data-rm="${it.id}" aria-label="Remove ${esc(it.file.name)}">×</button>
+    </li>`;
+  }
+  function paintRow(it) {
+    const el = document.querySelector(`[data-qid="${it.id}"]`);
+    if (!el) return;
+    el.className = `row ${it.status}` + (S.tool && S.tool.accepts !== 'any' && !CD.accepts(S.tool, it) ? ' dim' : '');
+    el.querySelector('.bar i').style.width = it.pct + '%';
+    el.querySelector('.st').textContent = statusText(it);
+  }
+
+  function fieldHtml(o) {
+    const id = `o-${o.id}`;
+    if (o.type === 'select') {
+      return `<label class="field"><span>${esc(o.label)}</span><select id="${id}" name="${o.id}">${o.choices
+        .map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(o.value) ? ' selected' : ''}>${esc(l)}</option>`)
+        .join('')}</select></label>`;
+    }
+    if (o.type === 'range') {
+      return `<label class="field"><span>${esc(o.label)} <output for="${id}">${o.value}${o.unit || ''}</output></span>
+        <input id="${id}" name="${o.id}" type="range" min="${o.min}" max="${o.max}" step="${o.step || 1}" value="${o.value}" data-unit="${esc(o.unit || '')}"></label>`;
+    }
+    if (o.type === 'number') {
+      return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="number" inputmode="decimal" min="${o.min ?? ''}" max="${o.max ?? ''}" step="${o.step || 1}" value="${esc(o.value)}"></label>`;
+    }
+    if (o.type === 'textarea') {
+      return `<label class="field"><span>${esc(o.label)}</span><textarea id="${id}" name="${o.id}" rows="${o.rows || 4}" placeholder="${esc(o.placeholder || '')}">${esc(o.value || '')}</textarea></label>`;
+    }
+    if (o.type === 'check') {
+      return `<label class="check"><input id="${id}" name="${o.id}" type="checkbox"${o.value ? ' checked' : ''}><span>${esc(o.label)}</span></label>`;
+    }
+    return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="text" placeholder="${esc(o.placeholder || '')}" value="${esc(o.value || '')}"></label>`;
+  }
+  function readOpts(tool) {
+    const opts = {};
+    (tool.options || []).forEach((o) => {
+      const el = document.getElementById(`o-${o.id}`);
+      if (!el) { opts[o.id] = o.value; return; }
+      if (o.type === 'check') opts[o.id] = el.checked;
+      else if (o.type === 'range' || o.type === 'number') opts[o.id] = el.value === '' ? null : Number(el.value);
+      else opts[o.id] = el.value;
+    });
+    return opts;
+  }
+
+  function resultHtml(r, i) {
+    if (r.text != null) {
+      return `<li class="res res-text">
+        <div class="meta"><b class="nm">${esc(r.name)}</b><small>${esc(r.note || '')}</small></div>
+        <textarea readonly rows="${Math.min(10, Math.max(2, String(r.text).split('\n').length))}" aria-label="${esc(r.name)}">${esc(r.text)}</textarea>
+        <div class="res-actions"><button class="btn sm ghost" type="button" data-copy="${i}">Copy</button>
+        ${r.blob ? `<button class="btn sm" type="button" data-dl="${i}">Download</button>` : ''}</div>
+      </li>`;
+    }
+    if (r.blob && r.blob.type.startsWith('image/') && !r._url) r._url = URL.createObjectURL(r.blob);
+    const thumb = r._url ? `<img src="${r._url}" alt="">` : `<span>${esc((CD.ext(r.name) || 'FILE').toUpperCase())}</span>`;
+    let size = CD.human(r.blob.size);
+    if (r.from) size = `${CD.human(r.from)} → ${CD.human(r.blob.size)} <em class="chg">(${CD.change(r.from, r.blob.size)})</em>`;
+    return `<li class="res">
+      <div class="thumb">${thumb}</div>
+      <div class="meta"><b class="nm">${esc(r.name)}</b><small>${size}</small>${r.note ? `<small class="note">${esc(r.note)}</small>` : ''}</div>
+      <button class="btn sm" type="button" data-dl="${i}">Download</button>
+    </li>`;
+  }
+
+  function resultsHtml() {
+    if (!S.results.length) return '';
+    const canShare = navigator.canShare && S.results.every((r) => r.blob);
+    return `<section class="results" aria-label="Results">
+      <div class="sec-head"><h2>Results <small>${S.results.length}</small></h2>
+        <div class="row-btns">
+          ${S.results.length > 1 && S.results.every((r) => r.blob) ? '<button class="btn sm" type="button" data-act="zip">Download all (ZIP)</button>' : ''}
+          <button class="link" type="button" data-act="clear-res">Clear</button>
+        </div></div>
+      <ul class="res-list">${S.results.map(resultHtml).join('')}</ul>
+    </section>`;
+  }
+
+  function dropHtml(tool, big) {
+    const text = tool && tool.accepts !== 'any' && Array.isArray(tool.accepts)
+      ? tool.accepts.map((k) => ACCEPT_TEXT[k]).join(' · ')
+      : 'Any file';
+    return `<button class="drop${big ? ' big' : ''}" id="drop" type="button" data-act="pick">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <strong>${big ? 'Drop files here, or tap to choose' : 'Add files'}</strong>
+      <span>${esc(text)}</span>
+    </button>`;
+  }
+
+  function homeHtml() {
+    const n = S.queue.length;
+    const fits = (t) => n && (t.accepts === 'any' || (Array.isArray(t.accepts) && S.queue.some((it) => CD.accepts(t, it))));
+    const groups = GROUPS.map(([g, label]) => {
+      const list = CD.tools.filter((t) => t.group === g);
+      if (!list.length) return '';
+      return `<section class="group"><h2>${label}</h2><div class="grid">${list
+        .map((t) => {
+          const cls = fits(t) ? ' fit' : n && !fits(t) ? ' dim' : '';
+          return `<a class="card${cls}" href="#/t/${t.id}"><span class="tile g-${g}" aria-hidden="true">${esc(t.icon)}</span><b>${esc(t.title)}</b><small>${esc(t.desc)}</small></a>`;
+        })
+        .join('')}</div></section>`;
+    }).join('');
+    return `<section class="hero">
+        <h1>Files, handled on your phone</h1>
+        <p class="lede">Convert, compress, merge, split and edit files. Nothing is uploaded. It works offline once loaded.</p>
+        ${dropHtml(null, true)}
+        ${n ? `<div class="pending"><span>${n} file${n > 1 ? 's' : ''} ready. Pick a tool. Highlighted tools fit your files.</span><button class="link" type="button" data-act="clear">Clear</button></div>` : ''}
+      </section>
+      ${groups}`;
+  }
+
+  function toolHtml(tool) {
+    const usesFiles = tool.accepts !== 'none';
+    const n = S.queue.length;
+    const fitting = usesFiles ? S.queue.filter((it) => CD.accepts(tool, it)).length : 0;
+    const queueHtml = usesFiles
+      ? `${n ? `<div class="qhead"><span>${n} file${n > 1 ? 's' : ''}${fitting < n ? ` · ${fitting} for this tool` : ''}</span><button class="link" type="button" data-act="clear">Clear all</button></div>` : ''}
+         <ul class="queue">${S.queue.map((it) => rowHtml(it, tool)).join('')}</ul>
+         ${n ? '' : dropHtml(tool, true)}
+         ${n ? `<button class="drop slim" type="button" data-act="pick"><strong>+ Add more files</strong></button>` : ''}`
+      : '';
+    const opts = (tool.options || []).length ? `<div class="opts">${tool.options.map(fieldHtml).join('')}</div>` : '';
+    return `<section class="tool">
+      <p class="lede">${esc(tool.desc)}</p>
+      ${queueHtml}
+      ${opts}
+      <div class="runbar">
+        <button class="btn" type="button" data-act="run" ${S.running ? 'disabled' : ''}>${S.running ? 'Working…' : esc(tool.action || 'Run')}</button>
+        <p class="status" id="status" aria-live="polite"></p>
+      </div>
+      ${resultsHtml()}
+    </section>`;
+  }
+
+  function render() {
+    const tool = S.tool;
+    const head = $('#head');
+    if (tool) {
+      head.innerHTML = `<a class="back" href="#/" aria-label="Back to all tools">←</a><h1 class="ttl">${esc(tool.title)}</h1>`;
+      app.innerHTML = toolHtml(tool);
+      picker.accept = tool.accepts === 'any' ? '' : CD.acceptFor(tool.accepts || []);
+    } else {
+      head.innerHTML = BRAND;
+      app.innerHTML = homeHtml();
+      picker.accept = '';
+    }
+  }
+
+  /* ---------- running ---------- */
+  function setBusy(on) {
+    S.running = on;
+    const b = app.querySelector('[data-act="run"]');
+    if (b) { b.disabled = on; b.textContent = on ? 'Working…' : (S.tool.action || 'Run'); }
+  }
+  function status(msg) { const s = $('#status'); if (s) s.textContent = msg; }
+  function progressFor(it, p) { it.pct = Math.max(0, Math.min(100, Math.round(p))); paintRow(it); }
+
+  async function run() {
+    const tool = S.tool;
+    if (!tool || S.running) return;
+    let opts;
+    try { opts = readOpts(tool); } catch (e) { return toast(e.message, true); }
+    const items = tool.accepts === 'none' ? [] : S.queue.filter((it) => CD.accepts(tool, it));
+    if (tool.accepts !== 'none' && !items.length && !tool.runForm) {
+      toast(`Add ${(Array.isArray(tool.accepts) ? tool.accepts.map((k) => ACCEPT_TEXT[k]).join(' or ') : 'a file')} first.`, true);
+      return picker.click();
+    }
+    if (tool.minFiles && items.length < tool.minFiles) return toast(`Add at least ${tool.minFiles} files.`, true);
+    if (tool.validate) {
+      try { tool.validate(opts, items); } catch (e) { return toast(e.message, true); }
+    }
+    const made = [];
+    setBusy(true);
+    try {
+      if (!items.length && tool.runForm) {
+        status('Working…');
+        made.push(...(await tool.runForm(opts)));
+      } else if (tool.mode === 'all') {
+        items.forEach((it) => { it.status = 'working'; it.pct = 0; it.err = ''; paintRow(it); });
+        status(`Working on ${items.length} files…`);
+        try {
+          const out = await tool.runAll(items, opts, { progress: progressFor });
+          out.forEach((r) => {
+            if (r.from === undefined) r.from = items.reduce((a, it) => a + it.file.size, 0);
+            made.push(r);
+          });
+          items.forEach((it) => { it.status = 'done'; it.pct = 100; paintRow(it); });
+        } catch (e) {
+          items.forEach((it) => { it.status = 'error'; it.err = e.message || String(e); paintRow(it); });
+          toast(e.message || String(e), true);
+        }
+      } else {
+        let n = 0;
+        for (const it of items) {
+          n++;
+          it.status = 'working'; it.pct = 0; it.err = ''; paintRow(it);
+          status(`${n} of ${items.length}: ${it.file.name}`);
+          try {
+            const out = await tool.runOne(it, opts, { progress: progressFor });
+            out.forEach((r) => {
+              if (r.from === undefined) r.from = out.length === 1 ? it.file.size : null;
+              made.push(r);
+            });
+            it.status = 'done'; it.pct = 100;
+          } catch (e) {
+            it.status = 'error';
+            it.err = e.message || String(e);
+            toast(`${it.file.name}: ${it.err}`, true);
+          }
+          paintRow(it);
+          await CD.tick();
+        }
+      }
+    } catch (e) {
+      toast(e.message || String(e), true);
+    }
+    const hadResults = made.length > 0;
+    S.results = made.concat(S.results);
+    setBusy(false);
+    render();
+    if (hadResults) {
+      const first = app.querySelector('.results');
+      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      toast(`${made.length} file${made.length > 1 ? 's' : ''} ready.`);
+    } else status('');
+  }
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); toast('Copied.'); }
+    catch (e) {
+      const t = document.createElement('textarea');
+      t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); toast('Copied.'); } catch (_) { toast("Couldn't copy. Select the text and copy it.", true); }
+      t.remove();
+    }
+  }
+
+  /* ---------- events ---------- */
+  app.addEventListener('click', async (e) => {
+    const t = e.target.closest('button, a');
+    if (!t) return;
+    if (t.dataset.rm) return removeItem(Number(t.dataset.rm));
+    if (t.dataset.dl != null) {
+      const r = S.results[Number(t.dataset.dl)];
+      return r && r.blob && CD.download(r.blob, r.name);
+    }
+    if (t.dataset.copy != null) {
+      const r = S.results[Number(t.dataset.copy)];
+      return r && copyText(r.text);
+    }
+    switch (t.dataset.act) {
+      case 'run': return run();
+      case 'pick': return picker.click();
+      case 'clear': return clearQueue();
+      case 'clear-res': return clearResults();
+      case 'zip': {
+        try {
+          const blob = await CD.zip(S.results);
+          CD.download(blob, `convert-desk-${S.tool ? S.tool.id : 'files'}.zip`);
+        } catch (err) { toast("Couldn't build the ZIP: " + err.message, true); }
+        return;
+      }
+    }
+  });
+  picker.addEventListener('change', () => { addFiles(picker.files); picker.value = ''; });
+  app.addEventListener('input', (e) => {
+    if (e.target.type === 'range') {
+      const out = app.querySelector(`output[for="${e.target.id}"]`);
+      if (out) out.textContent = e.target.value + (e.target.dataset.unit || '');
+    }
+  });
+  // drop files anywhere on the page
+  document.addEventListener('dragover', (e) => { e.preventDefault(); const d = $('#drop'); if (d) d.classList.add('drag'); });
+  document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { const d = $('#drop'); if (d) d.classList.remove('drag'); } });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const d = $('#drop'); if (d) d.classList.remove('drag');
+    if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+
+  route();
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+})();
