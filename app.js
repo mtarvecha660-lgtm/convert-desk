@@ -10,7 +10,7 @@
     docx: 'DOCX', json: 'JSON', text: 'TXT, MD, LOG, SRT, XML, HTML',
   };
   const BRAND = '<a class="brand" href="#/"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f5a300" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg><span>Convert Desk</span></a>';
-  const S = (CD.app = { queue: [], results: [], tool: null, running: false, uid: 0 });
+  const S = (CD.app = { queue: [], results: [], tool: null, running: false, uid: 0, saved: {} });
 
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdfjs/pdf.worker.min.js';
 
@@ -127,27 +127,28 @@
     el.querySelector('.st').textContent = statusText(it);
   }
 
-  function fieldHtml(o) {
+  function fieldHtml(o, v) {
     const id = `o-${o.id}`;
+    if (v === undefined) v = o.value;
     if (o.type === 'select') {
       return `<label class="field"><span>${esc(o.label)}</span><select id="${id}" name="${o.id}">${o.choices
-        .map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(o.value) ? ' selected' : ''}>${esc(l)}</option>`)
+        .map(([c, l]) => `<option value="${esc(c)}"${String(c) === String(v) ? ' selected' : ''}>${esc(l)}</option>`)
         .join('')}</select></label>`;
     }
     if (o.type === 'range') {
-      return `<label class="field"><span>${esc(o.label)} <output for="${id}">${o.value}${o.unit || ''}</output></span>
-        <input id="${id}" name="${o.id}" type="range" min="${o.min}" max="${o.max}" step="${o.step || 1}" value="${o.value}" data-unit="${esc(o.unit || '')}"></label>`;
+      return `<label class="field"><span>${esc(o.label)} <output for="${id}">${v}${o.unit || ''}</output></span>
+        <input id="${id}" name="${o.id}" type="range" min="${o.min}" max="${o.max}" step="${o.step || 1}" value="${v}" data-unit="${esc(o.unit || '')}"></label>`;
     }
     if (o.type === 'number') {
-      return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="number" inputmode="decimal" min="${o.min ?? ''}" max="${o.max ?? ''}" step="${o.step || 1}" value="${esc(o.value)}"></label>`;
+      return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="number" inputmode="decimal" min="${o.min ?? ''}" max="${o.max ?? ''}" step="${o.step || 1}" value="${esc(v)}"></label>`;
     }
     if (o.type === 'textarea') {
-      return `<label class="field"><span>${esc(o.label)}</span><textarea id="${id}" name="${o.id}" rows="${o.rows || 4}" placeholder="${esc(o.placeholder || '')}">${esc(o.value || '')}</textarea></label>`;
+      return `<label class="field"><span>${esc(o.label)}</span><textarea id="${id}" name="${o.id}" rows="${o.rows || 4}" placeholder="${esc(o.placeholder || '')}">${esc(v || '')}</textarea></label>`;
     }
     if (o.type === 'check') {
-      return `<label class="check"><input id="${id}" name="${o.id}" type="checkbox"${o.value ? ' checked' : ''}><span>${esc(o.label)}</span></label>`;
+      return `<label class="check"><input id="${id}" name="${o.id}" type="checkbox"${v ? ' checked' : ''}><span>${esc(o.label)}</span></label>`;
     }
-    return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="text" placeholder="${esc(o.placeholder || '')}" value="${esc(o.value || '')}"></label>`;
+    return `<label class="field"><span>${esc(o.label)}</span><input id="${id}" name="${o.id}" type="text" placeholder="${esc(o.placeholder || '')}" value="${esc(v || '')}"></label>`;
   }
   function readOpts(tool) {
     const opts = {};
@@ -171,6 +172,13 @@
       </li>`;
     }
     if (r.blob && r.blob.type.startsWith('image/') && !r._url) r._url = URL.createObjectURL(r.blob);
+    if (r.big && r._url) {
+      return `<li class="res res-big">
+        <img src="${r._url}" alt="${esc(r.note || r.name)}">
+        <div class="meta"><b class="nm">${esc(r.name)}</b><small>${CD.human(r.blob.size)}</small></div>
+        <button class="btn sm" type="button" data-dl="${i}">Download</button>
+      </li>`;
+    }
     const thumb = r._url ? `<img src="${r._url}" alt="">` : `<span>${esc((CD.ext(r.name) || 'FILE').toUpperCase())}</span>`;
     let size = CD.human(r.blob.size);
     if (r.from) size = `${CD.human(r.from)} → ${CD.human(r.blob.size)} <em class="chg">(${CD.change(r.from, r.blob.size)})</em>`;
@@ -237,7 +245,8 @@
          ${n ? '' : dropHtml(tool, true)}
          ${n ? `<button class="drop slim" type="button" data-act="pick"><strong>+ Add more files</strong></button>` : ''}`
       : '';
-    const opts = (tool.options || []).length ? `<div class="opts">${tool.options.map(fieldHtml).join('')}</div>` : '';
+    const saved = S.saved[tool.id] || {};
+    const opts = (tool.options || []).length ? `<div class="opts">${tool.options.map((o) => fieldHtml(o, o.id in saved ? saved[o.id] : o.value)).join('')}</div>` : '';
     return `<section class="tool">
       <p class="lede">${esc(tool.desc)}</p>
       ${queueHtml}
@@ -250,13 +259,18 @@
     </section>`;
   }
 
+  let rendered = null; // tool whose form is currently in the page
   function render() {
+    if (rendered && rendered.options && rendered.options.length) {
+      try { S.saved[rendered.id] = readOpts(rendered); } catch (e) {}
+    }
     const tool = S.tool;
+    rendered = tool || null;
     const head = $('#head');
     if (tool) {
       head.innerHTML = `<a class="back" href="#/" aria-label="Back to all tools">←</a><h1 class="ttl">${esc(tool.title)}</h1>`;
       app.innerHTML = toolHtml(tool);
-      picker.accept = tool.accepts === 'any' ? '' : CD.acceptFor(tool.accepts || []);
+      picker.accept = Array.isArray(tool.accepts) ? CD.acceptFor(tool.accepts) : '';
     } else {
       head.innerHTML = BRAND;
       app.innerHTML = homeHtml();
