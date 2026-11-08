@@ -1,6 +1,6 @@
-const CACHE = 'convert-desk-v4';
+const CACHE = 'convert-desk-v5';
 const FILES = [
-  './', './index.html', './styles.css', './app.js', './js/util.js', './js/tools-convert.js',
+  './', './index.html', './styles.css', './app.js', './js/util.js', './js/tools-convert.js', './js/tools-image.js', './js/tools-pdf.js',
   './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png',
   './libs/pdf-lib.min.js', './libs/xlsx.full.min.js', './libs/mammoth.browser.min.js',
   './libs/pdfjs/pdf.min.js', './libs/pdfjs/pdf.worker.min.js', './libs/jszip.min.js',
