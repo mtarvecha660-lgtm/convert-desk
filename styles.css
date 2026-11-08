@@ -168,3 +168,7 @@ input[type="range"] { width: 100%; accent-color: var(--acc); }
 }
 .toast.bad { background: #b3261e; color: #fff; }
 .toast.out { opacity: 0; }
+
+.res-big { grid-template-columns: minmax(0, 1fr) auto; }
+.res-big img { grid-column: 1 / -1; width: min(100%, 320px); justify-self: center; background: #fff; border-radius: 12px; padding: 12px; image-rendering: pixelated; }
+.res-big .meta { min-width: 0; }
